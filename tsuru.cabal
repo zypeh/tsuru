@@ -5,19 +5,12 @@ version:             1.0.0
 author:              zhengyan peh
 maintainer:          zypeh.geek@gmail.com
 
-tested-with:         GHC == 8.6.5
-
-common ghc-warnings
-  -- https://gitlab.haskell.org/ghc/ghc/wikis/design/warnings
-  ghc-options:       -Wall -Wcompat -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints -Wmissing-export-lists
-
-common executable-flags
-  ghc-options:       -threaded -rtsopts "-with-rtsopts=-N -A4m -n2m"
-
-common language-extensions
-  default-language:  Haskell2010
+tested-with:         GHC == 8.6.5 
 
 executable tsuru
-  import:            ghc-warnings, language-extensions, executable-flags
+  default-language:  Haskell2010
+  ghc-options:       -Wall -Werror -Wcompat
   main-is:           tsuru.hs
   build-depends:     base
+                   , binary
+                   , bytestring
