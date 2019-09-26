@@ -1,8 +1,8 @@
 module Main(main) where
 
--- import           Control.Monad.Extra  (ifM)
+import           Control.Monad.Extra  (ifM)
 import           Data.Binary.Get      (Get, getWord16be, getWord32le, runGet,
-                                       skip)
+                                       skip, getLazyByteString)
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Word            as W
 import           GHC.Int              (Int64)
@@ -38,8 +38,12 @@ data PcapHeader = PcapHeader
   } deriving (Show)
 
 getPcapHeader :: Get PcapHeader
-getPcapHeader = let consume = getWord32le in
-    PcapHeader <$> consume <*> consume <*> consume <*> consume
+getPcapHeader = do
+    timestampSec <- getWord32le
+    timestampUsec <- getWord32le
+    captureLen <- getWord32le
+    wireLen <- getWord32le
+    return $! PcapHeader timestampSec timestampUsec captureLen wireLen
 
 data UdpHeader = UdpHeader
   { udpSrcPort    :: {-# UNPACK #-} !W.Word16
@@ -52,6 +56,40 @@ getUdpHeader :: Get UdpHeader
 getUdpHeader = let consume = getWord16be in
     UdpHeader <$> consume <*> consume <*> consume <*> consume
 
+data QuotePacket = QuotePacket
+    { quoteBidPrices :: [BL.ByteString]
+    , quoteAskPrices :: [BL.ByteString]
+    } deriving (Show)
+
+-- parseQuoteDataPacket :: Get QuotePacket
+-- parseQuoteDataPacket = do
+--     skip
+--         ( 12 -- Issue Code 
+--         + 3 -- Issue seq no
+--         + 2 -- Market status type
+--         + 7 -- total bid quote volume
+--         )
+--     b1 <- getLazyByteString 5
+--     skip 7
+--     b2 <- getLazyByteString 5
+--     skip 7
+--     b3 <- getLazyByteString 5
+--     skip 7
+--     b4 <- getLazyByteString 5
+--     skip 7
+--     b5 <- getLazyByteString 5
+--     skip (7 + 7)
+--     a1 <- getLazyByteString 5
+--     skip 7
+--     a2 <- getLazyByteString 5
+--     skip 7
+--     a3 <- getLazyByteString 5
+--     skip 7
+--     a4 <- getLazyByteString 5
+--     skip 7
+--     a5 <- getLazyByteString 5
+--     return $! QuotePacket [b1, b2, b3, b4, b5] [a1, a2, a3, a4, a5]
+
 readPcapFile :: String -> IO ()
 readPcapFile fileName = do
     pcap <- BL.readFile fileName
@@ -63,7 +101,6 @@ readPcapFile fileName = do
     print $ runGet getPcapHeader payloadWithoutPcapGlobalHeader
     runGet getMarketData payloadWithoutPcapGlobalHeader -- should recursively read packets here
 
-
 getMarketData :: Get (IO ())
 getMarketData = do
     pcapHeader <- getPcapHeader
@@ -73,7 +110,15 @@ getMarketData = do
         then do
             skip packetLen
             return $ print packetLen
-        else do
+        else do -- Find a way to skip
             skip ethernetIPv4HeaderLen
-            -- take
-            print <$> getUdpHeader
+            _ <- print <$> getUdpHeader -- suppressed
+            quotePacket <- getLazyByteString 5
+            if quotePacket /= "B6034"
+                then do
+                    print <$> quotePacket
+                    -- skip packetLen
+                    -- return $ print packetLen
+                else do
+                    return $ print BL.pack "B6034"
+            -- _ <- print <$> parseQuoteDataPacket
