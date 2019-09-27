@@ -18,12 +18,6 @@ import           System.Environment            (getArgs)
 pcapGlobalHeaderLen :: Int64
 pcapGlobalHeaderLen = 24
 
--- pcapHeaderLen :: Int64
--- pcapHeaderLen = 32
-
--- udpHeaderLen :: Int64
--- udpHeaderLen = 8
-
 ethernetIPv4HeaderLen :: Int
 ethernetIPv4HeaderLen = 14 + 20
 
@@ -55,7 +49,6 @@ main = do
         parseArgs []             = putStrLn "No input. Exit now."
         parseArgs _              = putStrLn "unimplemented"
 
--- https://wiki.wireshark.org/Development/LibpcapFileFormat
 readPcapFile :: String -> IO ()
 readPcapFile fileName = do
     pcap <- BL.readFile fileName
