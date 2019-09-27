@@ -3,13 +3,17 @@
 module Main(main) where
 
 -- import           Control.Monad.Extra  (ifM)
-import           Data.Binary.Get      (Get, getLazyByteString, getWord16be,
-                                       getWord32le, runGet, skip)
-import qualified Data.ByteString.Lazy as BL
-import           Data.Maybe           (fromJust)
-import qualified Data.Word            as W
-import           GHC.Int              (Int64)
-import           System.Environment   (getArgs)
+import           Data.Binary.Get               (Decoder (..), Get,
+                                                getLazyByteString, getWord16be,
+                                                getWord32le, runGetIncremental,
+                                                skip)
+import qualified Data.ByteString               as B
+import qualified Data.ByteString.Lazy          as BL
+import qualified Data.ByteString.Lazy.Internal as BL
+import           Data.Maybe                    (fromJust, isJust)
+import qualified Data.Word                     as W
+import           GHC.Int                       (Int64)
+import           System.Environment            (getArgs)
 
 pcapGlobalHeaderLen :: Int64
 pcapGlobalHeaderLen = 24
@@ -55,12 +59,32 @@ main = do
 readPcapFile :: String -> IO ()
 readPcapFile fileName = do
     pcap <- BL.readFile fileName
-    let payloadWithoutPcapGlobalHeader = BL.drop pcapGlobalHeaderLen $ BL.take 1000 pcap -- should remove this cap later.
-    -- print $ runGet getPcapHeader payloadWithoutPcapGlobalHeader
-    print . fromJust $ runGet getMarketData payloadWithoutPcapGlobalHeader -- should recursively read packets here
+    let payloadWithoutPcapGlobalHeader = BL.drop pcapGlobalHeaderLen pcap
+    print $ incrementGetQuoteData payloadWithoutPcapGlobalHeader
 
-getMarketData :: Get (Maybe QuotePacket)
-getMarketData = do
+incrementGetQuoteData :: BL.ByteString -> [QuotePacket]
+incrementGetQuoteData input = fmap fromJust . filter isJust $ go decoder input
+    where
+        decoder = runGetIncremental getQuoteData
+        go :: Decoder (Maybe QuotePacket) -> BL.ByteString -> [Maybe QuotePacket]
+        go (Done leftover _consumed quotePacket) input' = quotePacket : go decoder (BL.chunk leftover input')
+        go (Partial k) input' = go (k . takeHeadChunk $ input') (dropHeadChunk input')
+        go (Fail _leftover _consumed msg) _input = error msg
+
+takeHeadChunk :: BL.ByteString -> Maybe B.ByteString
+takeHeadChunk lbs =
+    case lbs of
+        (BL.Chunk bs _) -> Just bs
+        _               -> Nothing
+
+dropHeadChunk :: BL.ByteString -> BL.ByteString
+dropHeadChunk lbs =
+    case lbs of
+        (BL.Chunk _ lbs') -> lbs'
+        _                 -> BL.Empty
+
+getQuoteData :: Get (Maybe QuotePacket)
+getQuoteData = do
     pcapHeader <- getPcapHeader
     let packetLen = fromIntegral $ pcapCaptureLen pcapHeader :: Int
 
