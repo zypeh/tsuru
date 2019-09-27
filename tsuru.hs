@@ -69,7 +69,7 @@ incrementGetQuoteData input = fmap fromJust . filter isJust $ go decoder input
         go :: Decoder (Maybe QuotePacket) -> BL.ByteString -> [Maybe QuotePacket]
         go (Done leftover _consumed quotePacket) input' = quotePacket : go decoder (BL.chunk leftover input')
         go (Partial k) input' = go (k . takeHeadChunk $ input') (dropHeadChunk input')
-        go (Fail _leftover _consumed msg) _input = error msg
+        go (Fail _leftover _consumed _msg) _input = [] -- error . show $ B.take 50 _leftover
 
 takeHeadChunk :: BL.ByteString -> Maybe B.ByteString
 takeHeadChunk lbs =
@@ -151,4 +151,5 @@ parseQuoteDataPacket = do
     a4 <- getLazyByteString 5
     skip 7
     a5 <- getLazyByteString 5
+    skip 50
     return $! QuotePacket [b1, b2, b3, b4, b5] [a1, a2, a3, a4, a5]
