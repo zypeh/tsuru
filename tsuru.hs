@@ -21,6 +21,9 @@ pcapGlobalHeaderLen = 24
 ethernetIPv4HeaderLen :: Int
 ethernetIPv4HeaderLen = 14 + 20
 
+udpHeaderLen :: Int
+udpHeaderLen = 8
+
 data PcapHeader = PcapHeader
   { pcapTimestampSec  :: {-# UNPACK #-} !W.Word32
   , pcapTimestampUsec :: {-# UNPACK #-} !W.Word32
@@ -62,7 +65,7 @@ incrementGetQuoteData input = fmap fromJust . filter isJust $ go decoder input
         go :: Decoder (Maybe QuotePacket) -> BL.ByteString -> [Maybe QuotePacket]
         go (Done leftover _consumed quotePacket) input' = quotePacket : go decoder (BL.chunk leftover input')
         go (Partial k) input' = go (k . takeHeadChunk $ input') (dropHeadChunk input')
-        go (Fail _leftover _consumed _msg) _input = [] -- error . show $ B.take 50 _leftover
+        go (Fail _leftover _consumed _msg) _input = [] -- error . show $ _consumed
 
 takeHeadChunk :: BL.ByteString -> Maybe B.ByteString
 takeHeadChunk lbs =
@@ -81,7 +84,7 @@ getQuoteData = do
     pcapHeader <- getPcapHeader
     let packetLen = fromIntegral $ pcapCaptureLen pcapHeader :: Int
 
-    if packetLen <= 0
+    if packetLen /= ethernetIPv4HeaderLen + udpHeaderLen + 215
         then do
             skip packetLen
             return Nothing
@@ -90,11 +93,14 @@ getQuoteData = do
             -- udpHeader <- getUdpHeader
             _ <- getUdpHeader
             quotePacket <- getLazyByteString 5
+            -- 63 bytes offset from the pcapHeader now
             if quotePacket /= "B6034"
                 then do
+                    -- _ <- fail ("Not B6034" ++ show packetLen)
                     skip packetLen
                     return Nothing
                 else do
+                    -- _ <- fail ("Is B6034" ++ show packetLen)
                     marketData <- parseQuoteDataPacket
                     return (Just marketData)
 
@@ -144,5 +150,13 @@ parseQuoteDataPacket = do
     a4 <- getLazyByteString 5
     skip 7
     a5 <- getLazyByteString 5
-    skip 50
+    skip 7
+    skip -- remaning unneeded data
+        ( 5 -- No. of best bid valid quote(total)	
+        + 5 * 4 -- No. of best bid quote (x5)
+        + 5 -- No. of best ask valid quote(total)
+        + 5 * 4 --No. of best ask quote (x5)
+        + 8 -- Quote accept time
+        + 1 -- End of Message
+        )
     return $! QuotePacket [b1, b2, b3, b4, b5] [a1, a2, a3, a4, a5]
