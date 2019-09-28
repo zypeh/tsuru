@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main(main) where
@@ -41,6 +42,9 @@ data UdpHeader = UdpHeader
 data QuotePacket = QuotePacket
   { quoteBidPrices :: [BL.ByteString]
   , quoteAskPrices :: [BL.ByteString]
+  , packetTime     :: (W.Word32, W.Word32) -- pcapTimestampSec & pcapTimestampUsec
+  , acceptTime     :: BL.ByteString
+  , issueCode      :: BL.ByteString
   } deriving (Show)
 
 main :: IO ()
@@ -90,7 +94,6 @@ getQuoteData = do
             return Nothing
         else do
             skip ethernetIPv4HeaderLen
-            -- udpHeader <- getUdpHeader
             _ <- getUdpHeader
             quotePacket <- getLazyByteString 5
             -- 63 bytes offset from the pcapHeader now
@@ -102,6 +105,7 @@ getQuoteData = do
                 else do
                     -- _ <- fail ("Is B6034" ++ show packetLen)
                     marketData <- parseQuoteDataPacket
+                        (pcapTimestampSec pcapHeader, pcapTimestampUsec pcapHeader)
                     return (Just marketData)
 
 
@@ -123,11 +127,11 @@ getUdpHeader = do
     checksum <- getWord16be
     return $! UdpHeader srcPort destPort payloadLen checksum
 
-parseQuoteDataPacket :: Get QuotePacket
-parseQuoteDataPacket = do
-    skip
-        ( 12 -- Issue Code
-        + 3 -- Issue seq no
+parseQuoteDataPacket :: (W.Word32, W.Word32) -> Get QuotePacket
+parseQuoteDataPacket pcapTimestamp = do
+    issueCode' <- getLazyByteString 12 -- Issue Code
+    skip 
+        ( 3 -- Issue seq no
         + 2 -- Market status type
         + 7 -- total bid quote volume
         )
@@ -152,11 +156,11 @@ parseQuoteDataPacket = do
     a5 <- getLazyByteString 5
     skip 7
     skip -- remaning unneeded data
-        ( 5 -- No. of best bid valid quote(total)	
+        ( 5 -- No. of best bid valid quote(total)
         + 5 * 4 -- No. of best bid quote (x5)
         + 5 -- No. of best ask valid quote(total)
         + 5 * 4 --No. of best ask quote (x5)
-        + 8 -- Quote accept time
-        + 1 -- End of Message
         )
-    return $! QuotePacket [b1, b2, b3, b4, b5] [a1, a2, a3, a4, a5]
+    acceptTime' <- getLazyByteString 8 -- Quote accept time
+    skip 1 -- End of Message
+    return $! QuotePacket [b1, b2, b3, b4, b5] [a1, a2, a3, a4, a5] pcapTimestamp acceptTime' issueCode'
