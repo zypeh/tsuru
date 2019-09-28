@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main(main) where
@@ -9,6 +8,7 @@ import           Data.Binary.Get               (Decoder (..), Get,
                                                 getWord32le, runGetIncremental,
                                                 skip)
 import qualified Data.ByteString               as B
+-- import qualified Data.ByteString.Char8         as C
 import qualified Data.ByteString.Lazy          as BL
 import qualified Data.ByteString.Lazy.Internal as BL
 import           Data.Maybe                    (fromJust, isJust)
@@ -46,6 +46,13 @@ data QuotePacket = QuotePacket
   , acceptTime     :: BL.ByteString
   , issueCode      :: BL.ByteString
   } deriving (Show)
+
+-- TODO: BL and C type conversion
+-- instance Show QuotePacket where
+--     show qp =
+--         (BL.unpack $ acceptTime qp) ++ " "
+--         ++ (BL.unpack $ issueCode qp) ++ " "
+--         ++ "\n"
 
 main :: IO ()
 main = do
@@ -130,7 +137,7 @@ getUdpHeader = do
 parseQuoteDataPacket :: (W.Word32, W.Word32) -> Get QuotePacket
 parseQuoteDataPacket pcapTimestamp = do
     issueCode' <- getLazyByteString 12 -- Issue Code
-    skip 
+    skip
         ( 3 -- Issue seq no
         + 2 -- Market status type
         + 7 -- total bid quote volume
