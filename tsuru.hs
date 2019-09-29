@@ -3,7 +3,7 @@
 module Main(main) where
 
 -- import           Control.Monad.Extra  (ifM)
-import           Data.Binary.Get               (Decoder (..), Get,
+import           Data.Binary.Get               (Decoder (..), Get, getInt32le,
                                                 getLazyByteString, getWord16be,
                                                 getWord32le, runGetIncremental,
                                                 skip)
@@ -12,12 +12,12 @@ import qualified Data.ByteString.Lazy          as BL
 import qualified Data.ByteString.Lazy.Char8    as C
 import qualified Data.ByteString.Lazy.Internal as BL
 import           Data.Maybe                    (fromJust, isJust)
+import           Data.Time.Clock.POSIX         (posixSecondsToUTCTime)
+import           Data.Time.Format              (defaultTimeLocale, formatTime,
+                                                rfc822DateFormat)
 import qualified Data.Word                     as W
-import           GHC.Int                       (Int64)
+import           GHC.Int                       (Int32, Int64)
 import           System.Environment            (getArgs)
-import Data.Time.Clock.Internal.SystemTime (MkSystemTime)
-import Data.Time.Clock.System (systemToUTCTime)
-import Data.Time.Format (formatTime, defaultTimeLocale, rfc822DateFormat)
 
 pcapGlobalHeaderLen :: Int64
 pcapGlobalHeaderLen = 24
@@ -29,8 +29,8 @@ udpHeaderLen :: Int
 udpHeaderLen = 8
 
 data PcapHeader = PcapHeader
-  { pcapTimestampSec  :: {-# UNPACK #-} !W.Int32
-  , pcapTimestampUsec :: {-# UNPACK #-} !W.Int32
+  { pcapTimestampSec  :: {-# UNPACK #-} !Int32
+  , pcapTimestampUsec :: {-# UNPACK #-} !Int32
   , pcapCaptureLen    :: {-# UNPACK #-} !W.Word32
   , pcapWireLen       :: {-# UNPACK #-} !W.Word32
   } deriving (Show)
@@ -45,19 +45,24 @@ data UdpHeader = UdpHeader
 data QuotePacket = QuotePacket
   { quoteBidPrices :: [BL.ByteString]
   , quoteAskPrices :: [BL.ByteString]
-  , packetTime     :: (W.Word32, W.Word32) -- pcapTimestampSec & pcapTimestampUsec
-  , acceptTime     :: BL.ByteString
+  , packetTime     :: (Int32, Int32) -- pcapTimestampSec & pcapTimestampUsec
+  , acceptTime     :: BL.ByteString -- HHMMSSuu
   , issueCode      :: BL.ByteString
   }
 
--- TODO: BL and C type conversion
 instance Show QuotePacket where
-    show qp = 
-        (formatTime defaultTimeLocale "%c" . systemToUTCTime $ castedSytemTime) ++ " " ++
-        (C.unpack $ acceptTime qp) ++ " " ++
-        (C.unpack $ issueCode qp) ++ " x"
+    show qp =
+        (formatTime defaultTimeLocale "%FT%T" $
+            posixSecondsToUTCTime $ realToFrac timeStamp) ++ ":" ++ (show $ tsUsec `quot` 1000) ++ " " ++
+        (parse $ C.unpack $ acceptTime qp) ++ " " ++
+        (C.unpack $ issueCode qp) ++ "<bqty5>@<bprice5> ... <bqty1>@<bprice1> <aqty1>@<aprice1> ... <aqty5>@<aprice5>"
         where
-            castedSytemTime = (MkSystemTime (fromIntegral . fst $ packetTime qp) (fromIntegral . snd $ packetTime qp))
+            (tsSec, tsUsec) = packetTime qp
+            timeStamp = tsSec + (tsUsec `quot` 1000000)
+
+            parse :: [Char] -> [Char]
+            parse (h1:h2:m1:m2:s1:s2:u1:u2) = h1 : h2 : ':' : m1 : m2 : ':' : s1 : s2 : ':' : u1 : u2
+            parse _ = "failed at parsing accept time"
 
 main :: IO ()
 main = do
@@ -139,7 +144,7 @@ getUdpHeader = do
     checksum <- getWord16be
     return $! UdpHeader srcPort destPort payloadLen checksum
 
-parseQuoteDataPacket :: (W.Word32, W.Word32) -> Get QuotePacket
+parseQuoteDataPacket :: (Int32, Int32) -> Get QuotePacket
 parseQuoteDataPacket pcapTimestamp = do
     issueCode' <- getLazyByteString 12 -- Issue Code
     skip
@@ -175,4 +180,9 @@ parseQuoteDataPacket pcapTimestamp = do
         )
     acceptTime' <- getLazyByteString 8 -- Quote accept time
     skip 1 -- End of Message
-    return $! QuotePacket [b1, b2, b3, b4, b5] [a1, a2, a3, a4, a5] pcapTimestamp acceptTime' issueCode'
+    return $! QuotePacket
+        [b1, b2, b3, b4, b5]
+        [a1, a2, a3, a4, a5]
+        pcapTimestamp
+        acceptTime'
+        issueCode'
