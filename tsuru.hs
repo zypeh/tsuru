@@ -8,13 +8,16 @@ import           Data.Binary.Get               (Decoder (..), Get,
                                                 getWord32le, runGetIncremental,
                                                 skip)
 import qualified Data.ByteString               as B
--- import qualified Data.ByteString.Char8         as C
 import qualified Data.ByteString.Lazy          as BL
+import qualified Data.ByteString.Lazy.Char8    as C
 import qualified Data.ByteString.Lazy.Internal as BL
 import           Data.Maybe                    (fromJust, isJust)
 import qualified Data.Word                     as W
 import           GHC.Int                       (Int64)
 import           System.Environment            (getArgs)
+import Data.Time.Clock.Internal.SystemTime (MkSystemTime)
+import Data.Time.Clock.System (systemToUTCTime)
+import Data.Time.Format (formatTime, defaultTimeLocale, rfc822DateFormat)
 
 pcapGlobalHeaderLen :: Int64
 pcapGlobalHeaderLen = 24
@@ -26,8 +29,8 @@ udpHeaderLen :: Int
 udpHeaderLen = 8
 
 data PcapHeader = PcapHeader
-  { pcapTimestampSec  :: {-# UNPACK #-} !W.Word32
-  , pcapTimestampUsec :: {-# UNPACK #-} !W.Word32
+  { pcapTimestampSec  :: {-# UNPACK #-} !W.Int32
+  , pcapTimestampUsec :: {-# UNPACK #-} !W.Int32
   , pcapCaptureLen    :: {-# UNPACK #-} !W.Word32
   , pcapWireLen       :: {-# UNPACK #-} !W.Word32
   } deriving (Show)
@@ -45,14 +48,16 @@ data QuotePacket = QuotePacket
   , packetTime     :: (W.Word32, W.Word32) -- pcapTimestampSec & pcapTimestampUsec
   , acceptTime     :: BL.ByteString
   , issueCode      :: BL.ByteString
-  } deriving (Show)
+  }
 
 -- TODO: BL and C type conversion
--- instance Show QuotePacket where
---     show qp =
---         (BL.unpack $ acceptTime qp) ++ " "
---         ++ (BL.unpack $ issueCode qp) ++ " "
---         ++ "\n"
+instance Show QuotePacket where
+    show qp = 
+        (formatTime defaultTimeLocale "%c" . systemToUTCTime $ castedSytemTime) ++ " " ++
+        (C.unpack $ acceptTime qp) ++ " " ++
+        (C.unpack $ issueCode qp) ++ " x"
+        where
+            castedSytemTime = (MkSystemTime (fromIntegral . fst $ packetTime qp) (fromIntegral . snd $ packetTime qp))
 
 main :: IO ()
 main = do
@@ -67,7 +72,7 @@ readPcapFile :: String -> IO ()
 readPcapFile fileName = do
     pcap <- BL.readFile fileName
     let payloadWithoutPcapGlobalHeader = BL.drop pcapGlobalHeaderLen pcap
-    print $ incrementGetQuoteData payloadWithoutPcapGlobalHeader
+    mapM_ print $ incrementGetQuoteData payloadWithoutPcapGlobalHeader
 
 incrementGetQuoteData :: BL.ByteString -> [QuotePacket]
 incrementGetQuoteData input = fmap fromJust . filter isJust $ go decoder input
@@ -120,8 +125,8 @@ getQuoteData = do
 
 getPcapHeader :: Get PcapHeader
 getPcapHeader = do
-    timestampSec <- getWord32le
-    timestampUsec <- getWord32le
+    timestampSec <- getInt32le
+    timestampUsec <- getInt32le
     captureLen <- getWord32le
     wireLen <- getWord32le
     return $! PcapHeader timestampSec timestampUsec captureLen wireLen
