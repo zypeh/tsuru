@@ -11,6 +11,7 @@ import qualified Data.ByteString               as B
 import qualified Data.ByteString.Lazy          as BL
 import qualified Data.ByteString.Lazy.Char8    as C
 import qualified Data.ByteString.Lazy.Internal as BL
+import           Data.List                     (intercalate, transpose)
 import           Data.Maybe                    (fromJust, isJust)
 import           Data.Time.Clock.POSIX         (posixSecondsToUTCTime)
 import           Data.Time.Format              (defaultTimeLocale, formatTime,
@@ -43,26 +44,35 @@ data UdpHeader = UdpHeader
   } deriving (Show)
 
 data QuotePacket = QuotePacket
-  { quoteBidPrices :: [BL.ByteString]
-  , quoteAskPrices :: [BL.ByteString]
-  , packetTime     :: (Int32, Int32) -- pcapTimestampSec & pcapTimestampUsec
-  , acceptTime     :: BL.ByteString -- HHMMSSuu
-  , issueCode      :: BL.ByteString
+  { quoteBidPrices   :: [BL.ByteString]
+  , quoteAskPrices   :: [BL.ByteString]
+  , packetTime       :: (Int32, Int32) -- pcapTimestampSec & pcapTimestampUsec
+  , acceptTime       :: BL.ByteString -- HHMMSSuu
+  , issueCode        :: BL.ByteString
+  , quoteBidQuantity :: [BL.ByteString]
+  , quoteAskQuantity :: [BL.ByteString]
   }
 
 instance Show QuotePacket where
     show qp =
-        (formatTime defaultTimeLocale "%FT%T" $
-            posixSecondsToUTCTime $ realToFrac timeStamp) ++ ":" ++ (show $ tsUsec `quot` 1000) ++ " " ++
-        (parse $ C.unpack $ acceptTime qp) ++ " " ++
-        (C.unpack $ issueCode qp) ++ "<bqty5>@<bprice5> ... <bqty1>@<bprice1> <aqty1>@<aprice1> ... <aqty5>@<aprice5>"
+        (formatTime defaultTimeLocale "%FT%T" $ posixSecondsToUTCTime $ realToFrac timeStamp) ++ ":" ++ (show tsMsec) ++ " " ++
+        (parseAcceptTime $ C.unpack $ acceptTime qp) ++ " " ++
+        (C.unpack $ issueCode qp) ++ " " ++
+        (intercalate " " $ parseQuote (quoteBidPrices qp) (quoteBidQuantity qp)) ++ " " ++
+        (intercalate " " $ parseQuote (quoteAskPrices qp) (quoteAskQuantity qp))
         where
             (tsSec, tsUsec) = packetTime qp
-            timeStamp = tsSec + (tsUsec `quot` 1000000)
+            tsMsec = tsUsec `quot` 1000
+            timeStamp = tsSec + (tsMsec `quot` 1000)
 
-            parse :: [Char] -> [Char]
-            parse (h1:h2:m1:m2:s1:s2:u1:u2) = h1 : h2 : ':' : m1 : m2 : ':' : s1 : s2 : ':' : u1 : u2
-            parse _ = "failed at parsing accept time"
+            parseAcceptTime :: [Char] -> [Char]
+            parseAcceptTime (h1:h2:m1:m2:s1:s2:u1:u2) = h1 : h2 : ':' : m1 : m2 : ':' : s1 : s2 : ':' : u1 : u2
+            parseAcceptTime _ = "failed at parsing accept time"
+
+            parseQuote :: [BL.ByteString] -> [BL.ByteString] -> [[Char]]
+            parseQuote prices quantities = do
+                combined <- transpose [prices, quantities]
+                pure . C.unpack $ C.intercalate "@" combined
 
 main :: IO ()
 main = do
@@ -153,25 +163,26 @@ parseQuoteDataPacket pcapTimestamp = do
         + 7 -- total bid quote volume
         )
     b1 <- getLazyByteString 5
-    skip 7
+    bq1 <- getLazyByteString 7
     b2 <- getLazyByteString 5
-    skip 7
+    bq2 <- getLazyByteString 7
     b3 <- getLazyByteString 5
-    skip 7
+    bq3 <- getLazyByteString 7
     b4 <- getLazyByteString 5
-    skip 7
+    bq4 <- getLazyByteString 7
     b5 <- getLazyByteString 5
-    skip (7 + 7)
+    bq5 <- getLazyByteString 7
+    skip 7
     a1 <- getLazyByteString 5
-    skip 7
+    aq1 <- getLazyByteString 7
     a2 <- getLazyByteString 5
-    skip 7
+    aq2 <- getLazyByteString 7
     a3 <- getLazyByteString 5
-    skip 7
+    aq3 <- getLazyByteString 7
     a4 <- getLazyByteString 5
-    skip 7
+    aq4 <- getLazyByteString 7
     a5 <- getLazyByteString 5
-    skip 7
+    aq5 <- getLazyByteString 7
     skip -- remaning unneeded data
         ( 5 -- No. of best bid valid quote(total)
         + 5 * 4 -- No. of best bid quote (x5)
@@ -186,3 +197,5 @@ parseQuoteDataPacket pcapTimestamp = do
         pcapTimestamp
         acceptTime'
         issueCode'
+        [bq1, bq2, bq3, bq4, bq5]
+        [aq1, aq2, aq3, aq4, aq5]
