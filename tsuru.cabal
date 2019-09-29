@@ -14,5 +14,5 @@ executable tsuru
   build-depends:     base
                    , binary
                    , bytestring
-                   , time >=1.9.3
-                   --, extra
+                   , sort
+                   , time

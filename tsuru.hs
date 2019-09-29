@@ -1,8 +1,5 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Main(main) where
 
--- import           Control.Monad.Extra  (ifM)
 import           Data.Binary.Get               (Decoder (..), Get, getInt32le,
                                                 getLazyByteString, getWord16be,
                                                 getWord32le, runGetIncremental,
@@ -72,22 +69,29 @@ instance Show QuotePacket where
             parseQuote :: [BL.ByteString] -> [BL.ByteString] -> [[Char]]
             parseQuote prices quantities = do
                 combined <- transpose [prices, quantities]
-                pure . C.unpack $ C.intercalate "@" combined
+                pure . C.unpack $ C.intercalate (C.pack "@") combined
 
 main :: IO ()
 main = do
     args <- getArgs
     parseArgs args
     where
-        parseArgs [pcapFileName] = readPcapFile pcapFileName
-        parseArgs []             = putStrLn "No input. Exit now."
-        parseArgs _              = putStrLn "unimplemented"
+        parseArgs [pcapFileName]          = readPcapFile pcapFileName False
+        parseArgs ("-r" : [pcapFileName]) = readPcapFile pcapFileName True
+        parseArgs []                      = putStrLn "No input. Exit now."
+        parseArgs _                       = putStrLn "unimplemented"
 
-readPcapFile :: String -> IO ()
-readPcapFile fileName = do
+readPcapFile :: String -> Bool -> IO ()
+readPcapFile fileName reorderFlag = do
     pcap <- BL.readFile fileName
     let payloadWithoutPcapGlobalHeader = BL.drop pcapGlobalHeaderLen pcap
-    mapM_ print $ incrementGetQuoteData payloadWithoutPcapGlobalHeader
+    case reorderFlag of
+        True -> mapM_ print $ sortPackets $ incrementGetQuoteData payloadWithoutPcapGlobalHeader
+        False -> mapM_ print $ incrementGetQuoteData payloadWithoutPcapGlobalHeader
+
+--
+sortPackets :: [QuotePacket] -> [QuotePacket]
+sortPackets = undefined
 
 incrementGetQuoteData :: BL.ByteString -> [QuotePacket]
 incrementGetQuoteData input = fmap fromJust . filter isJust $ go decoder input
@@ -124,15 +128,12 @@ getQuoteData = do
             _ <- getUdpHeader
             quotePacket <- getLazyByteString 5
             -- 63 bytes offset from the pcapHeader now
-            if quotePacket /= "B6034"
+            if quotePacket /= (C.pack "B6034")
                 then do
-                    -- _ <- fail ("Not B6034" ++ show packetLen)
                     skip packetLen
                     return Nothing
                 else do
-                    -- _ <- fail ("Is B6034" ++ show packetLen)
-                    marketData <- parseQuoteDataPacket
-                        (pcapTimestampSec pcapHeader, pcapTimestampUsec pcapHeader)
+                    marketData <- parseQuoteDataPacket (pcapTimestampSec pcapHeader, pcapTimestampUsec pcapHeader)
                     return (Just marketData)
 
 
