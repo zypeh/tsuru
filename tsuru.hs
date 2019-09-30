@@ -6,16 +6,20 @@ import           Data.Binary.Get               (Decoder (..), Get, getInt32le,
                                                 skip)
 import qualified Data.ByteString               as B
 import qualified Data.ByteString.Lazy          as BL
+import           Data.ByteString.Lazy.Builder  (charUtf8, hPutBuilder,
+                                                lazyByteString)
 import qualified Data.ByteString.Lazy.Char8    as C
 import qualified Data.ByteString.Lazy.Internal as BL
 import           Data.List                     (intercalate, sortBy, transpose)
 import           Data.Maybe                    (fromJust, isJust)
+import           Data.Monoid                   (mconcat, (<>))
 import           Data.Ord                      (comparing)
 import           Data.Time.Clock.POSIX         (posixSecondsToUTCTime)
 import           Data.Time.Format              (defaultTimeLocale, formatTime)
 import           Data.Word                     (Word16, Word32)
 import           GHC.Int                       (Int32, Int64)
 import           System.Environment            (getArgs)
+import           System.IO                     (stdout)
 
 pcapGlobalHeaderLen :: Int64
 pcapGlobalHeaderLen = 24
@@ -86,8 +90,15 @@ readPcapFile fileName reorderFlag = do
     pcap <- BL.readFile fileName
     let payloadWithoutPcapGlobalHeader = BL.drop pcapGlobalHeaderLen pcap
     case reorderFlag of
-        True -> mapM_ print $ sortPackets $ incrementGetQuoteData payloadWithoutPcapGlobalHeader
-        False -> mapM_ print $ incrementGetQuoteData payloadWithoutPcapGlobalHeader
+        True -> optimizedPrint . sortPackets $ incrementGetQuoteData payloadWithoutPcapGlobalHeader
+        False -> optimizedPrint $ incrementGetQuoteData payloadWithoutPcapGlobalHeader
+    where
+        -- Basically put all bytestring into one big chunk and print it out instead of
+        -- printing it N times.
+        optimizedPrint :: [QuotePacket] -> IO ()
+        optimizedPrint qs = hPutBuilder stdout . unlines' $ fmap (lazyByteString . C.pack . show) qs
+
+        unlines' = mconcat . map (<> charUtf8 '\n')
 
 -- Sort by turning the bytestring typed acceptTime to Int and compare
 sortPackets :: [QuotePacket] -> [QuotePacket]
@@ -100,7 +111,7 @@ incrementGetQuoteData input = fmap fromJust . filter isJust $ go decoder input
         go :: Decoder (Maybe QuotePacket) -> BL.ByteString -> [Maybe QuotePacket]
         go (Done leftover _consumed quotePacket) input' = quotePacket : go decoder (BL.chunk leftover input')
         go (Partial k) input' = go (k . takeHeadChunk $ input') (dropHeadChunk input')
-        go (Fail _leftover _consumed _msg) _input = [] -- error . show $ _consumed
+        go (Fail _leftover _consumed _msg) _input = []
 
 takeHeadChunk :: BL.ByteString -> Maybe B.ByteString
 takeHeadChunk lbs =
