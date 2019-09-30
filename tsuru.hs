@@ -8,12 +8,12 @@ import qualified Data.ByteString               as B
 import qualified Data.ByteString.Lazy          as BL
 import qualified Data.ByteString.Lazy.Char8    as C
 import qualified Data.ByteString.Lazy.Internal as BL
-import           Data.List                     (intercalate, transpose)
+import           Data.List                     (intercalate, sortBy, transpose)
 import           Data.Maybe                    (fromJust, isJust)
+import           Data.Ord                      (comparing)
 import           Data.Time.Clock.POSIX         (posixSecondsToUTCTime)
-import           Data.Time.Format              (defaultTimeLocale, formatTime,
-                                                rfc822DateFormat)
-import qualified Data.Word                     as W
+import           Data.Time.Format              (defaultTimeLocale, formatTime)
+import           Data.Word                     (Word16, Word32)
 import           GHC.Int                       (Int32, Int64)
 import           System.Environment            (getArgs)
 
@@ -29,15 +29,15 @@ udpHeaderLen = 8
 data PcapHeader = PcapHeader
   { pcapTimestampSec  :: {-# UNPACK #-} !Int32
   , pcapTimestampUsec :: {-# UNPACK #-} !Int32
-  , pcapCaptureLen    :: {-# UNPACK #-} !W.Word32
-  , pcapWireLen       :: {-# UNPACK #-} !W.Word32
+  , pcapCaptureLen    :: {-# UNPACK #-} !Word32
+  , pcapWireLen       :: {-# UNPACK #-} !Word32
   } deriving (Show)
 
 data UdpHeader = UdpHeader
-  { udpSrcPort    :: {-# UNPACK #-} !W.Word16
-  , udpDestPort   :: {-# UNPACK #-} !W.Word16
-  , udpPayloadLen :: {-# UNPACK #-} !W.Word16
-  , udpCheckSum   :: {-# UNPACK #-} !W.Word16
+  { udpSrcPort    :: {-# UNPACK #-} !Word16
+  , udpDestPort   :: {-# UNPACK #-} !Word16
+  , udpPayloadLen :: {-# UNPACK #-} !Word16
+  , udpCheckSum   :: {-# UNPACK #-} !Word16
   } deriving (Show)
 
 data QuotePacket = QuotePacket
@@ -89,9 +89,9 @@ readPcapFile fileName reorderFlag = do
         True -> mapM_ print $ sortPackets $ incrementGetQuoteData payloadWithoutPcapGlobalHeader
         False -> mapM_ print $ incrementGetQuoteData payloadWithoutPcapGlobalHeader
 
---
+-- Sort by turning the bytestring typed acceptTime to Int and compare
 sortPackets :: [QuotePacket] -> [QuotePacket]
-sortPackets = undefined
+sortPackets = sortBy (comparing $ fst . fromJust . C.readInt . acceptTime)
 
 incrementGetQuoteData :: BL.ByteString -> [QuotePacket]
 incrementGetQuoteData input = fmap fromJust . filter isJust $ go decoder input
@@ -125,7 +125,8 @@ getQuoteData = do
             return Nothing
         else do
             skip ethernetIPv4HeaderLen
-            _ <- getUdpHeader
+            -- _ <- getUdpHeader -- use this if you want the udp information
+            skip udpHeaderLen
             quotePacket <- getLazyByteString 5
             -- 63 bytes offset from the pcapHeader now
             if quotePacket /= (C.pack "B6034")
@@ -147,8 +148,8 @@ getPcapHeader = do
     wireLen <- getWord32le
     return $! PcapHeader timestampSec timestampUsec captureLen wireLen
 
-getUdpHeader :: Get UdpHeader
-getUdpHeader = do
+_getUdpHeader :: Get UdpHeader
+_getUdpHeader = do
     srcPort <- getWord16be
     destPort <- getWord16be
     payloadLen <- getWord16be

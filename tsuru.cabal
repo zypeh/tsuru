@@ -9,7 +9,7 @@ tested-with:         GHC == 8.6.5
 
 executable tsuru
   default-language:  Haskell2010
-  -- ghc-options:       -Wall -Werror -Wcompat
+  ghc-options:       -Wall -Werror -Wcompat -O2
   main-is:           tsuru.hs
   build-depends:     base
                    , binary
